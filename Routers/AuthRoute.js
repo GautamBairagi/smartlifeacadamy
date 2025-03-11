@@ -1,5 +1,6 @@
 import express from "express";
 import { 
+    deltebook,
     getAllUsers, 
     signUp, 
     editProfile, 
@@ -9,9 +10,11 @@ import {
     addBook,
     getbook,
     getBookByid,
+    getsubscription,
     createSubscriptionByAdmin,
 getAllUsersWithPromo,
-cancelSubscription
+cancelSubscription,
+changePassword
 } from "../Controllers/AuthCtrl.js";
 
 const router = express.Router();
@@ -32,6 +35,7 @@ router.post("/category", createCategory);
 
 //get Category
 router.get("/getcategory",getcategory)
+router.get("/getsubscription",getsubscription)
 
 //add book
 router.post("/book", addBook);
@@ -44,6 +48,13 @@ router.get("/getAllUsersWithPromo",getAllUsersWithPromo)
 router.post("/createSubscriptionByAdmin",createSubscriptionByAdmin)
 router.put("/cancelSubscription/:user_id",cancelSubscription)
 
-createSubscriptionByAdmin
+router.delete("/deltebook/:id", deltebook)
+
+
+
+
+
+// Route to change password
+router.post("/changepassword", changePassword);
 
 export default router;

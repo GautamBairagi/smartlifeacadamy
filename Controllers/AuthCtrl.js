@@ -4,11 +4,6 @@ import jwt from "jsonwebtoken";
 import { generatetoken } from "../Config/jwt.js";
 import { v4 as uuidv4 } from "uuid"; // Import UUID for unique promo codes
 
-// Admin Table
-// id, email, password, timestamp
-
-// Users Table
-// id, firstname, lastname, email, password, timestamp, is_active, promocode
 
 // 1. Get All Users
 export const getAllUsers = async (req, res) => {
@@ -25,51 +20,104 @@ export const getAllUsers = async (req, res) => {
     }
 };
 
-// 2. Signup
-// export const signUp = async (req, res) => {
-//     try {
-//         const { firstname, lastname, email, password, promocode, is_active = 1, confirmpassword } = req.body;
-//         const [existingUser] = await connection.query("SELECT email FROM users WHERE email=?", [email]);
-
-//         if (existingUser.length > 0) {
-//             return res.status(403).json({ message: "User already exists" });
-//         }
-
-//         const hashPassword = await bcrypt.hash(password, 10);
-
-//         const userData = { firstname, lastname, email, password: hashPassword, is_active, promocode, confirmpassword };
-//         const [result] = await connection.query("INSERT INTO users SET ?", userData);
-
-//         return res.status(200).json({ message: "User created successfully", data: { id: result.insertId, ...userData } });
-//     } catch (error) {
-//         return res.status(500).json({ message: "Internal server error", error: error.message });
-//     }
-// };
-
 
 export const signUp = async (req, res) => {
     try {
-        const { firstname, lastname, email, password, confirmpassword } = req.body;
-        const [existingUser] = await connection.query("SELECT email FROM users WHERE email=?", [email]);
+        const { firstname,  email, password, confirmpassword, promocode, selectedPlan } = req.body;
+    console.log("req.body", req.body);
 
+        // Validate required fields
+        // if (!firstname || !lastname || !email || !password || !selectedPlan) {
+        //     return res.status(400).json({ message: "All fields are required, including plan selection" });
+        // }
+
+        // Validate password match
+        // if (password !== confirmpassword) {
+        //     return res.status(400).json({ message: "Passwords do not match" });
+        // }
+
+        // Check if the email already exists
+        const [existingUser] = await connection.query("SELECT id FROM users WHERE email=?", [email]);
         if (existingUser.length > 0) {
             return res.status(403).json({ message: "User already exists" });
         }
 
+        // Fetch the selected subscription plan from the database
+        const [subscription] = await connection.query("SELECT * FROM subscriptions WHERE plan_name = ?", [selectedPlan]);
+
+        if (subscription.length === 0) {
+            return res.status(400).json({ message: "Selected subscription plan does not exist" });
+        }
+
+        let referredBy = null;
+        let discountApplied = false;
+        let finalAmount = parseFloat(subscription[0].amount); // Default price from existing plan
+
+        // Check if promo code is valid and apply discount
+        if (promocode) {
+            const [referrer] = await connection.query("SELECT id FROM users WHERE promocode = ? AND is_active = 1", [promocode]);
+
+            if (referrer.length > 0) {
+                referredBy = referrer[0].id;
+                finalAmount *= 0.80; // Apply 20% discount
+                discountApplied = true;
+            } else {
+                return res.status(400).json({ message: "Invalid or inactive promo code" });
+            }
+        }
+
+        // Hash the password
         const hashPassword = await bcrypt.hash(password, 10);
-        const promoCode = uuidv4().slice(0, 8).toUpperCase(); // Generate unique 8-character promo code
 
-        const userData = { firstname, lastname, email, password: hashPassword, is_active: 1, promocode: promoCode };
-        const [result] = await connection.query("INSERT INTO users SET ?", userData);
+        // Generate unique promo code for the new user
+        const newPromoCode = uuidv4().slice(0, 8).toUpperCase();
 
-        return res.status(200).json({ 
-            message: "User created successfully", 
-            data: { id: result.insertId, ...userData } 
+        // Insert user data
+        const [userResult] = await connection.query(
+            "INSERT INTO users (firstname,  email, password, is_active, promocode, referred_by) VALUES (?, ?, ?, ?, ?, ?)", 
+            [firstname,  email, hashPassword, 1, newPromoCode, referredBy]
+        );
+
+        const userId = userResult.insertId;
+
+        // Update the existing subscription with the new user
+        const startDate = new Date();
+        let endDate = new Date();
+        if (selectedPlan.toLowerCase() === "monthly") endDate.setMonth(endDate.getMonth() + 1);
+        else if (selectedPlan.toLowerCase() === "6 months") endDate.setMonth(endDate.getMonth() + 6);
+        else if (selectedPlan.toLowerCase() === "1 year") endDate.setFullYear(endDate.getFullYear() + 1);
+
+        await connection.query(
+            "UPDATE subscriptions SET user_id = ?, amount = ?, discount_applied = ?, referred_by = ?, promocode = ?, start_date = ?, end_date = ?, is_active = ? WHERE plan_name = ?",
+            [userId, finalAmount, discountApplied, referredBy, newPromoCode, startDate, endDate, 1, selectedPlan]
+        );
+
+        return res.status(200).json({
+            message: "User registered successfully",
+            data: {
+                id: userId,
+                promocode: newPromoCode,
+                referred_by: referredBy,
+                subscription: {
+                    user_id: userId,
+                    plan_name: selectedPlan,
+                    amount: finalAmount,
+                    original_price: parseFloat(subscription[0].amount),
+                    discount_applied: discountApplied,
+                    start_date: startDate.toISOString(),
+                    end_date: endDate.toISOString(),
+                    is_active: 1
+                }
+            }
         });
+
     } catch (error) {
+        console.error("Signup Error:", error);
         return res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };
+
+
 
 
 
@@ -95,39 +143,14 @@ export const editProfile = async (req, res) => {
     }
 };
 
-// 4. Login API for Admin & User
-// export const login = async (req, res) => {
-//     try {
-//         const { email, password } = req.body;
-//         const mysqlQuery = "SELECT * FROM users WHERE email= ?";
-//         const [existingUser] = await connection.query(mysqlQuery, [email]);
 
-//         if (existingUser.length === 0) {
-//             return res.status(403).json({ message: "Please sign up first" });
-//         }
-
-//         const user = existingUser[0];
-//         const comparePassword = await bcrypt.compare(password, user.password);
-//         if (!comparePassword) {
-//             return res.status(403).json({ message: "Password is incorrect" });
-//         }
-
-//         await connection.query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
-//         const token = await generatetoken(user.id);
-
-//         return res.status(200).json({
-//             message: "Login Successful",
-//             data: { id: user.id, firstname: user.firstname, lastname: user.lastname, email: user.email, token },
-//         });
-//     } catch (error) {
-//         return res.status(500).json({ message: "Internal server error", error: error.message });
-//     }
-// };
 
 
 export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
+        console.log("email passs", email, password);
+        
 
         // Check if the email exists in the admin table
         const adminQuery = "SELECT * FROM admin WHERE email= ?";
@@ -142,8 +165,11 @@ export const login = async (req, res) => {
 
             const token = await generatetoken(admin.id, "admin"); // Optionally pass role
             return res.status(200).json({
-                message: "Admin Login Successful",
-                data: { id: admin.id, email: admin.email, role: "admin", token },
+                message: "Admin Login successfull",
+             success: true,
+                data: { id: admin.id, email: admin.email,},
+                role: "admin" ,
+                token
             });
         }
 
@@ -152,7 +178,7 @@ export const login = async (req, res) => {
         const [existingUser] = await connection.query(userQuery, [email]);
 
         if (existingUser.length === 0) {
-            return res.status(403).json({ message: "Please sign up first" });
+            return res.status(401).json({ message: "Please sign up first" });
         }
 
         const user = existingUser[0];
@@ -165,8 +191,10 @@ export const login = async (req, res) => {
         const token = await generatetoken(user.id, "user");
 
         return res.status(200).json({
-            message: "User Login Successful",
-            data: { id: user.id, firstname: user.firstname, lastname: user.lastname, email: user.email, role: "user", token },
+            message: "User Login Successfull",
+            success: true,
+            data: { id: user.id, firstname: user.firstname, lastname: user.lastname, email: user.email },
+            role: "user", token 
         });
     } catch (error) {
         return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -344,6 +372,8 @@ export const getAllUsersWithPromo = async (req, res) => {
 
 
 
+
+
 export const cancelSubscription = async (req, res) => {
     try {
         const { user_id } = req.params;
@@ -368,65 +398,12 @@ export const cancelSubscription = async (req, res) => {
 };
 
 
-// Create Subscription
-
-// export const createSubscription = async (req, res) => {
-//     try {
-//         const { user_id, plan_name, amount, promocode } = req.body;
-//         let finalAmount = amount;
-//         let discountApplied = false;
-//         let referredBy = null;
-
-//         // Check if promo code exists and belongs to an active user
-//         if (promocode) {
-//             const [referrer] = await connection.query("SELECT id FROM users WHERE promocode = ? AND is_active = 1", [promocode]);
-
-//             if (referrer.length > 0) {
-//                 finalAmount = amount * 0.80; // Apply 20% discount
-//                 discountApplied = true;
-//                 referredBy = referrer[0].id;
-//             }
-//         }
-
-//         // Calculate subscription period
-//         const startDate = new Date();
-//         let endDate = new Date();
-//         if (plan_name.toLowerCase() === "monthly") endDate.setMonth(endDate.getMonth() + 1);
-//         else if (plan_name.toLowerCase() === "6 months") endDate.setMonth(endDate.getMonth() + 6);
-//         else if (plan_name.toLowerCase() === "1 year") endDate.setFullYear(endDate.getFullYear() + 1);
-
-//         const [result] = await connection.query(
-//             "INSERT INTO subscriptions (user_id, plan_name, amount, original_price, discount_applied, referred_by, promocode, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-//             [user_id, plan_name, finalAmount, amount, discountApplied, referredBy, promocode, startDate, endDate, 1]
-//         );
-
-//         return res.status(201).json({
-//             message: "Subscription created successfully",
-//             data: {
-//                 id: result.insertId,
-//                 user_id,
-//                 plan_name,
-//                 amount: finalAmount,
-//                 original_price: amount,
-//                 discount_applied: discountApplied,
-//                 referred_by: referredBy,
-//                 promocode,
-//                 start_date: startDate,
-//                 end_date: endDate,
-//                 is_active: 1
-//             }
-//         });
-
-//     } catch (error) {
-//         return res.status(500).json({ message: "Internal server error", error: error.message });
-//     }
-// };
 
 
 export const createSubscriptionByAdmin = async (req, res) => {
     try {
         const { admin_id, user_id, plan_name, amount, promocode } = req.body;
-        
+
         // Verify if the admin exists
         const [admin] = await connection.query("SELECT * FROM admin WHERE id = ?", [admin_id]);
         if (admin.length === 0) {
@@ -442,9 +419,10 @@ export const createSubscriptionByAdmin = async (req, res) => {
             const [referrer] = await connection.query("SELECT id FROM users WHERE promocode = ? AND is_active = 1", [promocode]);
 
             if (referrer.length > 0) {
-                finalAmount = amount * 0.80; // Apply 20% discount
+                // Apply 20% discount if a valid promo code is found
+                finalAmount = amount * 0.80; // 20% discount
                 discountApplied = true;
-                referredBy = referrer[0].id;
+                referredBy = referrer[0].id; // Assign the referring user's ID
             }
         }
 
@@ -455,7 +433,7 @@ export const createSubscriptionByAdmin = async (req, res) => {
         else if (plan_name.toLowerCase() === "6 months") endDate.setMonth(endDate.getMonth() + 6);
         else if (plan_name.toLowerCase() === "1 year") endDate.setFullYear(endDate.getFullYear() + 1);
 
-        // Insert subscription
+        // Insert the new subscription into the database
         const [result] = await connection.query(
             "INSERT INTO subscriptions (user_id, plan_name, amount, original_price, discount_applied, referred_by, promocode, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [user_id, plan_name, finalAmount, amount, discountApplied, referredBy, promocode, startDate, endDate, 1]
@@ -479,6 +457,70 @@ export const createSubscriptionByAdmin = async (req, res) => {
         });
 
     } catch (error) {
+        return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+};
+
+
+export const getsubscription = async (req, res) => {
+try{
+    const mysqlQuery = "SELECT * FROM subscriptions";
+    const [result] = await connection.query(mysqlQuery);
+    if (result.length > 0) {
+        return res.status(200).json({ message: "subscription fatched successfully",
+            data:result
+         });
+    } else {
+        return res.status(404).json({ message: "subscription not found" });
+    }
+}
+catch{
+    return res.status(500).json({ message: "Internal Server error" , error: error.message });
+}
+
+
+ 
+}
+
+
+
+
+
+export const changePassword = async (req, res) => {
+    try {
+        const { email, currentPassword, newPassword } = req.body;
+
+        // Validate required fields
+        if (!email || !currentPassword || !newPassword) {
+            return res.status(400).json({ message: "All fields are required" });
+        }
+
+        // Fetch user data
+        const [user] = await connection.query("SELECT id, password FROM users WHERE email = ?", [email]);
+
+        if (user.length === 0) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const userId = user[0].id;
+        const hashedPassword = user[0].password;
+
+        // Verify current password
+        const passwordMatch = await bcrypt.compare(currentPassword, hashedPassword);
+        if (!passwordMatch) {
+            return res.status(400).json({ message: "Incorrect current password" });
+        }
+
+        // Hash the new password
+        const newHashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update password in database
+        await connection.query("UPDATE users SET password = ? WHERE id = ?", [newHashedPassword, userId]);
+
+        return res.status(200).json({ message: "Password updated successfully" });
+
+    } catch (error) {
+        console.error("Password Change Error:", error);
         return res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };
