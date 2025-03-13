@@ -14,7 +14,8 @@ import {
     createSubscriptionByAdmin,
 getAllUsersWithPromo,
 cancelSubscription,
-changePassword
+changePassword,
+getBookByCategoryId
 } from "../Controllers/AuthCtrl.js";
 
 const router = express.Router();
@@ -37,19 +38,16 @@ router.post("/category", createCategory);
 router.get("/getcategory",getcategory)
 router.get("/getsubscription",getsubscription)
 
-//add book
 router.post("/book", addBook);
-//get book
-router.get("/getbook", getbook)
-
-router.get("/getBookByid/:id", getBookByid)
-
+router.get("/book", getbook)
+router.get("/book/:id", getBookByid)
+router.delete("/book/:id", deltebook)
 router.get("/getAllUsersWithPromo",getAllUsersWithPromo)
 router.post("/createSubscriptionByAdmin",createSubscriptionByAdmin)
 router.put("/cancelSubscription/:user_id",cancelSubscription)
 
-router.delete("/deltebook/:id", deltebook)
 
+router.get("/getBookByCategoryId/:id", getBookByCategoryId)
 
 
 

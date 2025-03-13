@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { generatetoken } from "../Config/jwt.js";
 import { v4 as uuidv4 } from "uuid"; // Import UUID for unique promo codes
+import { config } from "dotenv";
 
 
 // 1. Get All Users
@@ -255,30 +256,32 @@ export const getcategory = async(req,res) =>{
 
 export const addBook = async (req, res) => {
     try {
-        const { user_id, category_id, book_name, price, description, status, image } = req.body;
+        const {  category_id, book_name,  description, status, image, audio_book_url,
+            flip_book_url, author} = req.body;
+        console.log("addBook", req.body);
 
-        if (!user_id || !category_id || !book_name || !price) {
-            return res.status(400).json({ message: "Missing required fields" });
-        }
+        // if (!user_id || !category_id || !book_name ) {
+        //     return res.status(400).json({ message: "Missing required fields" });
+        // }
 
         const statusValue = status || "not completed"; // Default status
-
         const [result] = await connection.query(
-            "INSERT INTO book (user_id, category_id, book_name, price, description, status, image) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [user_id, category_id, book_name, price, description, statusValue, image]
+            "INSERT INTO book ( category_id, book_name,  description, status, image, audio_book_url, flip_book_url, author) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?)",
+            [ category_id, book_name,  description, statusValue, image, audio_book_url,
+                flip_book_url, author]
         );
-
         return res.status(201).json({
             message: "Book added successfully",
             data: {
                 id: result.insertId,
-                user_id,
                 category_id,
                 book_name,
-                price,
                 description,
                 status: statusValue,
-                image
+                image,
+                audio_book_url,
+                flip_book_url,
+                 author
             }
         });
 
@@ -308,7 +311,6 @@ export const getbook = async(req, res) =>{
 }
 
 export const getBookByid = async(req, res) =>{
-
     try{
         const {id} = req.params;
         const mysqlQuery = "SELECT * FROM book WHERE id =?";
@@ -323,11 +325,43 @@ export const getBookByid = async(req, res) =>{
              return res.status(404).json({ message: "No Book found" }); 
         }
     }
-    catch{
+    catch(error){
         return res.status(500).json({message:"Internal server error", error: error.message })
 
     }
 }
+
+
+export const getBookByCategoryId = async (req, res) => {
+    try {  
+        
+        
+        const { id } = req.params;
+        console.log("Category ID received:", req.params);
+
+        const mysqlQuery = "SELECT * FROM book WHERE category_id = ?";
+        const [result] = await connection.query(mysqlQuery, [id]);
+
+        console.log("Query Result:", result);
+
+        if (result.length > 0) {
+            return res.status(200).json({
+                message: "Category-wise books fetched successfully",
+                data: result
+            });
+        } else {
+            return res.status(404).json({ message: "No books found for this category" });
+        }
+    } catch (error) {
+        console.error("Database Error:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+};
+
+
 
 export const  deltebook = async(req, res) => {
     const {id} = req.params;
